@@ -1,0 +1,91 @@
+<script>
+
+window.onload = function() {
+};
+function go() {
+    var c=document.getElementById("myCanvas");
+    var ctx=c.getContext("2d");
+    var img=document.getElementById("scream");
+    
+    var rawWidth = img.width, rawHeight = img.height;
+    var scalingFactor = rawWidth>rawHeight ? c.width/rawWidth : c.height/rawHeight;
+    var scaledWidth = Math.floor(rawWidth*scalingFactor);
+    var scaledHeight = Math.floor(rawHeight*scalingFactor);
+    console.log(rawWidth);
+    ctx.drawImage(img,0,0,rawWidth,rawHeight, 0,0,scaledWidth,scaledHeight);
+    
+    
+    var imgData=ctx.getImageData(0,0, scaledWidth, scaledHeight);
+    console.log(imgData);
+    var pixelCount = scaledWidth*scaledHeight;
+    var pixelBrightness = new Uint8Array(pixelCount);
+    
+    for (var i=0; i<pixelCount; i++) {
+        var imgDataIdx = i*4;
+        var brightness = imgData.data[imgDataIdx] + imgData.data[imgDataIdx+1] + imgData.data[imgDataIdx+2];
+        pixelBrightness[i] = brightness >> 2;
+    }
+    
+    for (var level=0; level<10; level++) {
+        var pixelState = new Uint8Array(pixelCount);
+        var threshold = 480>>2;
+        for (var i=0; i<pixelCount; i++) {
+            if (pixelBrightness[i] < threshold) pixelState[i] = 0xff; // This pixel is too dark! Mark it as used
+        }
+        // Fill in around the edges so we don't have to worry about bounds checking
+        for (var i=0; i<scaledWidth; i++) {
+            pixelState[i] = 0xe0;
+            pixelState[i + scaledWidth*(scaledHeight-1)] = 0xe0;
+        }
+        for (var i=0; i<scaledHeight; i++) {
+            pixelState[i*scaledWidth] = 0xe0;
+            pixelState[i*scaledWidth + scaledWidth-1] = 0xe0;
+        }
+        
+        for (var i=0; i<pixelCount; i++) {
+            if (i!=0) break; //TEMP!
+            i = 291 + 546*scaledWidth; //TEMP!
+            console.log(pixelState[i]);
+            
+            console.log(i);
+            if (pixelState[i]) continue;
+            console.log('flooding');
+            var settled = [];
+            var frontier = [i];
+            while (frontier.length>0) {
+                var floodIdx = frontier.pop();
+                settled.push(floodIdx);
+                var tryDeltas = [-1, +1, -scaledWidth, +scaledWidth];
+                for (var tryIdx=0; tryIdx<4; tryIdx++) {
+                    var tryAt = floodIdx + tryDeltas[tryIdx];
+                    if (pixelState[tryAt]==0) {
+                        frontier.push(tryAt);
+                        pixelState[tryAt] = 128;
+                    }
+                }
+            }
+            
+            
+        }
+        
+        
+        break;
+    }
+    
+    for (var i=0; i<pixelCount; i++) {
+        var imgDataIdx = i*4;
+        
+        imgData.data[imgDataIdx] = pixelState[i];
+        imgData.data[imgDataIdx+1] = pixelState[i];
+        imgData.data[imgDataIdx+2] = pixelState[i];
+        imgData.data[imgDataIdx+3] = 255;
+    }
+    console.log('putting');
+    ctx.putImageData(imgData, 0,0)
+    
+    
+}
+</script>
+
+<canvas id='myCanvas' width=1000 height=1000></canvas>
+<img style='display:none' src='1.jpg' id='scream' onload='go()' />
