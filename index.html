@@ -2,33 +2,154 @@
 
 window.onload = function() {
 };
+var slideThreshold = 0;
+
+function isRectangleIsh(pts, grayPixels) {
+    var angles = [];
+    var distances = [];
+    for (var i=0; i<4; i++) {
+      var next = (i+1)%4;
+      distances[i] = distance(pts[i], pts[next]);
+      angles[i] = Math.atan2(pts[i][0] - pts[next][0], pts[i][1] - pts[next][1]);
+    }
+    
+    var angleThreshold = Math.PI/6;
+    for (var i=0; i<4; i++) {
+      var angleDiff = angles[(i+1)%4] - angles[i];
+      if (angleDiff > Math.PI) angleDiff -= Math.PI*2;
+      if (angleDiff < -Math.PI) angleDiff += Math.PI*2;
+      angleDiff = Math.abs(angleDiff);
+      
+      if (Math.abs(Math.PI/2 - angleDiff) > angleThreshold) {
+        return false;
+      }
+    }
+    
+    var shortEdges = (distances[0] + distances[2]);
+    var longEdges = (distances[1] + distances[3]);
+    if (shortEdges>longEdges) {
+      var temp = shortEdges;
+      shortEdges = longEdges;
+      longEdges = temp;
+    }
+    if (shortEdges >= longEdges*.3 || shortEdges < longEdges * .1) {
+      return false;
+    }
+    
+    var long1 = Math.max(distances[0], distances[1]);
+    var long2 = Math.max(distances[2], distances[3]);
+    var short1 = Math.min(distances[0], distances[1]);
+    var short2 = Math.min(distances[2], distances[3]);
+    if (long1 < .9*long2 || long2 < .9*long1) return false;
+    if (short1 > .15*longEdges) return false;
+    if (short2 > .15*longEdges) return false;
+    
+    return true;
+    //return grayPixels >= rectArea(pts)*.8;
+}
+function distance(a, b) {
+  var dx = a[0] - b[0];
+  var dy = a[1] - b[1];
+  return Math.sqrt(dx*dx + dy*dy);
+}
+function triangleArea(x,y,z) {
+  var a = distance(x,y);
+  var b = distance(y,z);
+  var c = distance(z,x);
+  var s = (a+b+c)/2;
+  return Math.sqrt(s*(s-a)*(s-b)*(s-c));
+}
+function rectArea(pts) {
+  return triangleArea(pts[0], pts[1], pts[2]) + triangleArea(pts[1], pts[3], pts[2]);
+}
+
+
+function middle(rect) {
+  var x = 0, y = 0;
+  for (var i=0; i<rect.length; i++) {
+    x += rect[i][0];
+    y += rect[i][1];
+  }
+  return [x/4, y/4];
+}
+
+function ptInRect(pt, rect) {
+  var minX = Infinity;
+  var maxX = -Infinity;
+  var minY = Infinity;
+  var maxY = -Infinity;
+  for (var i=0; i<4; i++) {
+    minX = Math.min(minX, rect[i][0]);
+    maxX = Math.max(maxX, rect[i][0]);
+    minY = Math.min(minY, rect[i][1]);
+    maxY = Math.max(maxY, rect[i][1]);
+  }
+  
+  return pt[0] > minX && pt[0] < maxX && pt[1] > minY && pt[1] < maxY;
+} 
+
+function overlaps(rectA, rectB) {
+  var middleA = middle(rectA);
+  var middleB = middle(rectB);
+  
+  return ptInRect(middleA, rectB) || ptInRect(middleB, rectA);
+}
+
+function dedupify(raw) {
+  var deduped = [];
+  
+  for (var i=0; i<raw.length; i++) {
+    var dup = false;
+    for (var j=0; j<deduped.length && !dup; j++) {
+      if (overlaps(raw[i], deduped[j])) {
+        dup = true;
+      }
+    }
+    
+    if (!dup) deduped.push(raw[i]);
+  }
+  
+  return deduped;
+}
+
 function go() {
+    var thresholdValue = document.getElementById('threshold').value;
+    console.log(thresholdValue);
+    
     var c=document.getElementById("myCanvas");
     var ctx=c.getContext("2d");
+    
+    var decorations=document.getElementById("decorations");
+    var decorationsCtx=decorations.getContext("2d");
+    decorationsCtx.clearRect(0,0,1000,1000)
+    
     var img=document.getElementById("scream");
     
     var rawWidth = img.width, rawHeight = img.height;
     var scalingFactor = rawWidth>rawHeight ? c.width/rawWidth : c.height/rawHeight;
     var scaledWidth = Math.floor(rawWidth*scalingFactor);
     var scaledHeight = Math.floor(rawHeight*scalingFactor);
-    console.log(rawWidth);
     ctx.drawImage(img,0,0,rawWidth,rawHeight, 0,0,scaledWidth,scaledHeight);
     
-    
     var imgData=ctx.getImageData(0,0, scaledWidth, scaledHeight);
-    console.log(imgData);
     var pixelCount = scaledWidth*scaledHeight;
     var pixelBrightness = new Uint8Array(pixelCount);
     
     for (var i=0; i<pixelCount; i++) {
         var imgDataIdx = i*4;
-        var brightness = imgData.data[imgDataIdx] + imgData.data[imgDataIdx+1] + imgData.data[imgDataIdx+2];
+        var r = imgData.data[imgDataIdx];
+        var g = imgData.data[imgDataIdx+1];
+        var b = imgData.data[imgDataIdx+2];
+        var brightness = r+g+b;//-Math.abs(r-g)-Math.abs(g-b)-Math.abs(b-r);
         pixelBrightness[i] = brightness >> 2;
     }
     
-    for (var level=0; level<10; level++) {
+    var wordRectangles = [];
+    
+    for (var level=4; level<16; level++) {
         var pixelState = new Uint8Array(pixelCount);
-        var threshold = 480>>2;
+        var threshold = Math.floor(thresholdValue * (level)/10 /100*256*3)>>2;
+        console.log('threshold', threshold);
         for (var i=0; i<pixelCount; i++) {
             if (pixelBrightness[i] < threshold) pixelState[i] = 0xff; // This pixel is too dark! Mark it as used
         }
@@ -43,13 +164,7 @@ function go() {
         }
         
         for (var i=0; i<pixelCount; i++) {
-            if (i!=0) break; //TEMP!
-            i = 291 + 546*scaledWidth; //TEMP!
-            console.log(pixelState[i]);
-            
-            console.log(i);
             if (pixelState[i]) continue;
-            console.log('flooding');
             var settled = [];
             var frontier = [i];
             while (frontier.length>0) {
@@ -65,27 +180,137 @@ function go() {
                 }
             }
             
-            
+            if (settled.length>500 && settled.length<4000) {
+                // Rough size cutoff. Don't even try for very little or very small
+                var xTotal=0, yTotal=0;
+                for (var i=0; i<settled.length; i++) {
+                    xTotal += settled[i] % scaledWidth;
+                    yTotal += Math.floor(settled[i] / scaledWidth);
+                }
+                var comX = Math.round(xTotal / settled.length);
+                var comY = Math.round(yTotal / settled.length);
+                
+                var pts = [[comX-1.0021, comY-1.0004], [comX+1.0034, comY-1.0533], [comX+1.00321, comY+1.003811], [comX-1.0440, comY+1.05446]];
+                
+                for (var repelIter=0;repelIter<20; repelIter++) {
+                    var forces = [[0,0],[0,0],[0,0],[0,0]];
+                    
+                    for (var repelFrom=0; repelFrom<4; repelFrom++) {
+                        for (var repelTo=0; repelTo<4; repelTo++) {
+                            if (repelFrom==repelTo) continue;
+                            
+                            var dx = pts[repelFrom][0] - pts[repelTo][0];
+                            var dy = pts[repelFrom][1] - pts[repelTo][1];
+                            var magnitude = Math.sqrt(dx*dx + dy*dy);
+                            
+                            var forceMagnitude = 1/Math.sqrt(dx*dx + dy*dy);
+                            forces[repelFrom][0] += dx*forceMagnitude;
+                            forces[repelFrom][1] += dy*forceMagnitude;
+                        }
+                    }
+                    
+                    for (var repelFrom=0; repelFrom<4; repelFrom++) {
+                        var forceDistance = Math.sqrt(forces[repelFrom][0]*forces[repelFrom][0] + forces[repelFrom][1]*forces[repelFrom][1]);
+                        
+                        var sworlCenterX = Math.round(pts[repelFrom][0] + 10*forces[repelFrom][0]/forceDistance);
+                        var sworlCenterY = Math.round(pts[repelFrom][1] + 10*forces[repelFrom][1]/forceDistance);
+                        var foundSworlEnd = false;
+                        for (var sworlSize=0; sworlSize<20 && !foundSworlEnd; sworlSize++) {
+                            for (var sworlX=-sworlSize; sworlX<=sworlSize && !foundSworlEnd; sworlX++) {
+                                for (var dir=-1; dir<=1 && !foundSworlEnd; dir+=2) {
+                                    var sworlY = (sworlSize - Math.abs(sworlX))*dir;
+                                    var sworlIdx = sworlCenterX+sworlX + (sworlCenterY+sworlY)*scaledWidth;
+                                    if (pixelState[sworlIdx]==128) {
+                                        pts[repelFrom][0] = sworlCenterX+sworlX;
+                                        pts[repelFrom][1] = sworlCenterY+sworlY;
+                                        foundSworlEnd = true;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        /*decorationsCtx.beginPath();
+                        decorationsCtx.lineWidth="1";
+                        decorationsCtx.strokeStyle=["red", "blue", "green", "yellow"][repelFrom];
+                        decorationsCtx.rect(pts[repelFrom][0], pts[repelFrom][1], 1, 1);
+                        decorationsCtx.stroke();*/
+                    }
+                    
+                }
+                
+                if (isRectangleIsh(pts, settled.length)) {
+                    wordRectangles.push(pts);
+                    
+                    decorationsCtx.strokeStyle="red";
+                    decorationsCtx.beginPath();
+                    
+                    decorationsCtx.moveTo(pts[0][0], pts[0][1]);
+                    decorationsCtx.lineTo(pts[1][0], pts[1][1]);
+                    decorationsCtx.lineTo(pts[2][0], pts[2][1]);
+                    decorationsCtx.lineTo(pts[3][0], pts[3][1]);
+                    decorationsCtx.lineTo(pts[0][0], pts[0][1]);
+                    decorationsCtx.stroke();
+                }
+            }
+            for (var resetIdx=0; resetIdx<settled.length; resetIdx++) {
+                pixelState[settled[resetIdx]] = 0x30;
+            }
         }
         
-        
-        break;
+        if (level==5) {
+            for (var i=0; i<pixelCount; i++) {
+                var imgDataIdx = i*4;
+                
+                var x = i % scaledWidth;
+                
+                if (x>=slideThreshold) {
+                  imgData.data[imgDataIdx] = pixelState[i];
+                  imgData.data[imgDataIdx+1] = pixelState[i];
+                  imgData.data[imgDataIdx+2] = pixelState[i];
+                  imgData.data[imgDataIdx+3] = 255;
+                }
+            }
+        }
     }
     
-    for (var i=0; i<pixelCount; i++) {
-        var imgDataIdx = i*4;
-        
-        imgData.data[imgDataIdx] = pixelState[i];
-        imgData.data[imgDataIdx+1] = pixelState[i];
-        imgData.data[imgDataIdx+2] = pixelState[i];
-        imgData.data[imgDataIdx+3] = 255;
+    var deduped = dedupify(wordRectangles);
+    for (var i=0; i<deduped.length; i++) {
+
+        decorationsCtx.strokeStyle="blue";
+        decorationsCtx.beginPath();
+        var pts = deduped[i];
+        decorationsCtx.moveTo(pts[0][0], pts[0][1]);
+        decorationsCtx.lineTo(pts[1][0], pts[1][1]);
+        decorationsCtx.lineTo(pts[2][0], pts[2][1]);
+        decorationsCtx.lineTo(pts[3][0], pts[3][1]);
+        decorationsCtx.lineTo(pts[0][0], pts[0][1]);
+        decorationsCtx.stroke();
     }
-    console.log('putting');
+    
     ctx.putImageData(imgData, 0,0)
-    
-    
+}
+
+function slide(e) {
+  console.log(e.layerX);
+  slideThreshold = e.layerX;
+  go();
 }
 </script>
 
-<canvas id='myCanvas' width=1000 height=1000></canvas>
-<img style='display:none' src='1.jpg' id='scream' onload='go()' />
+<div>
+  <input type='range' id='threshold' value='59'>
+</div>
+
+<div style="position: relative;">
+ <canvas id='myCanvas' width=1000 height=1000
+   style="position: absolute; left: 0; top: 0; z-index: 0;"></canvas>
+ <canvas id='decorations' width=1000 height=1000
+   style="position: absolute; left: 0; top: 0; z-index: 1;"></canvas>
+</div>
+
+<img style='display:none' src='2.jpg' id='scream' onload='go()' />
+
+<script>
+document.getElementById('decorations').onclick = slide;
+document.getElementById('threshold').onchange = go;
+</script>
