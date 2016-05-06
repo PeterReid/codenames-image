@@ -52,6 +52,11 @@ function distance(a, b) {
   var dy = a[1] - b[1];
   return Math.sqrt(dx*dx + dy*dy);
 }
+function distanceSquared(a, b) {
+  var dx = a[0] - b[0];
+  var dy = a[1] - b[1];
+  return (dx*dx + dy*dy);
+}
 function triangleArea(x,y,z) {
   var a = distance(x,y);
   var b = distance(y,z);
@@ -112,6 +117,75 @@ function dedupify(raw) {
   return deduped;
 }
 
+function rectsToPts(rects) {
+  var pts = [];
+  for (var i=0; i<rects.length; i++) {
+    pts.push(middle(rects[i]));
+  }
+  return pts;
+}
+
+function computeGridSize(pts) {
+  var distances = [];
+  for (var i=0; i<pts.length; i++) {
+    for (var j=0; j<i; j++) {
+      distances.push(distance(pts[i], pts[j]));
+    }
+  }
+  
+  distances.sort(function(a, b){return a-b});
+  return distances[Math.floor(distances.length/40)];
+}
+
+function linearInterpFloat(a, b, x) {
+  return a + (b-a)*x;
+}
+
+function linearInterpPoints(pt1, pt2, x) {
+  return [linearInterpFloat(pt1[0], pt2[0], x),
+          linearInterpFloat(pt1[1], pt2[1], x) ];
+}
+
+function fitness(gridPts, rectangleCenters, draw) {
+  var badness = 0;
+  var used = new Array(rectangleCenters.length);
+  for (var i=0; i<used.length; i++) {
+    used[i] = 0;
+  }
+  
+  for (var i=0; i<=4; i++) {
+    var top1 = linearInterpPoints(gridPts[0], gridPts[1], i/4);
+    var bottom1 = linearInterpPoints(gridPts[2], gridPts[3], i/4);
+    
+    for (var j=0; j<=4; j++) {
+      var gridPt = linearInterpPoints(top1, bottom1, j/4);
+      
+      var minDistance = Infinity;
+      var minIdx = NaN;
+      for (var p=0; p<rectangleCenters.length; p++) {
+        var thisDistance = distanceSquared(gridPt, rectangleCenters[p]);
+        if (thisDistance < minDistance) {
+          minDistance = thisDistance;
+          minIdx = p;
+        }
+      }
+      
+      used[minIdx]++;
+      
+      badness += minDistance * used[minIdx]*used[minIdx];
+      
+      if (draw) {
+        decorationsCtx.beginPath();
+        decorationsCtx.strokeStyle="blue";
+        decorationsCtx.arc(gridPt[0],gridPt[1],4,0,2*Math.PI);
+        decorationsCtx.stroke();
+      }
+    }
+  }
+  return badness;
+}
+
+var decorationsCtx;
 function go() {
     var thresholdValue = document.getElementById('threshold').value;
     console.log(thresholdValue);
@@ -120,7 +194,7 @@ function go() {
     var ctx=c.getContext("2d");
     
     var decorations=document.getElementById("decorations");
-    var decorationsCtx=decorations.getContext("2d");
+    decorationsCtx=decorations.getContext("2d");
     decorationsCtx.clearRect(0,0,1000,1000)
     
     var img=document.getElementById("scream");
@@ -241,7 +315,7 @@ function go() {
                 if (isRectangleIsh(pts, settled.length)) {
                     wordRectangles.push(pts);
                     
-                    decorationsCtx.strokeStyle="red";
+                    /*decorationsCtx.strokeStyle="red";
                     decorationsCtx.beginPath();
                     
                     decorationsCtx.moveTo(pts[0][0], pts[0][1]);
@@ -249,7 +323,7 @@ function go() {
                     decorationsCtx.lineTo(pts[2][0], pts[2][1]);
                     decorationsCtx.lineTo(pts[3][0], pts[3][1]);
                     decorationsCtx.lineTo(pts[0][0], pts[0][1]);
-                    decorationsCtx.stroke();
+                    decorationsCtx.stroke();*/
                 }
             }
             for (var resetIdx=0; resetIdx<settled.length; resetIdx++) {
@@ -274,9 +348,13 @@ function go() {
     }
     
     var deduped = dedupify(wordRectangles);
+    var rectCenters = rectsToPts(deduped);
+    var gridSize = computeGridSize(rectCenters);
+    
+    
     for (var i=0; i<deduped.length; i++) {
 
-        decorationsCtx.strokeStyle="blue";
+        /*decorationsCtx.strokeStyle="blue";
         decorationsCtx.beginPath();
         var pts = deduped[i];
         decorationsCtx.moveTo(pts[0][0], pts[0][1]);
@@ -285,7 +363,53 @@ function go() {
         decorationsCtx.lineTo(pts[3][0], pts[3][1]);
         decorationsCtx.lineTo(pts[0][0], pts[0][1]);
         decorationsCtx.stroke();
+        */
+        decorationsCtx.beginPath();
+        decorationsCtx.strokeStyle="yellow";
+        decorationsCtx.arc(rectCenters[i][0],rectCenters[i][1],4,0,2*Math.PI);
+        decorationsCtx.stroke();
+        
+        decorationsCtx.beginPath();
+        decorationsCtx.strokeStyle="green";
+        decorationsCtx.moveTo(rectCenters[i][0],rectCenters[i][1]);
+        decorationsCtx.lineTo(rectCenters[i][0]+gridSize,rectCenters[i][1]);
+        decorationsCtx.stroke();
     }
+    
+    var guess0 = [
+      [0, 0], [scaledWidth, 0],
+      [0, scaledHeight], [scaledWidth, scaledHeight]
+    ]
+    
+    for (var stepSize = 128; stepSize>=4; stepSize/=2) {
+      for (var i=0; i<100; i++) {
+        var best = [];
+        var bestBadness = Infinity;
+        
+        for (var mutatePoint=0; mutatePoint<4; mutatePoint++) {
+          for (var mutateCoord=0; mutateCoord<2; mutateCoord++) {
+            for (var mutateAmount = -stepSize; mutateAmount<=stepSize; mutateAmount+=stepSize*2) {
+              var was = guess0[mutatePoint][mutateCoord];
+              guess0[mutatePoint][mutateCoord] += mutateAmount;
+              
+              var thisBadness = fitness(guess0, rectCenters);
+              if (thisBadness < bestBadness) {
+                bestBadness = thisBadness;
+                best = {pt: mutatePoint, coord: mutateCoord, amount: mutateAmount};
+              }
+              
+              guess0[mutatePoint][mutateCoord] = was;
+            }
+          }
+        }
+        
+        guess0[best.pt][best.coord] += best.amount;
+      }
+    }
+    
+    fitness(guess0, rectCenters, true);
+    
+    
     
     ctx.putImageData(imgData, 0,0)
 }
@@ -298,7 +422,7 @@ function slide(e) {
 </script>
 
 <div>
-  <input type='range' id='threshold' value='59'>
+  <input type='range' id='threshold' value='52'>
 </div>
 
 <div style="position: relative;">
